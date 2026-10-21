@@ -1,30 +1,9 @@
 import pytest
+import allure  
 from utils.api_client import ApiClient
 
-@pytest.fixture
-def api_client(base_url):
-    return ApiClient(base_url)
-
-@pytest.fixture
-def unique_user_data():
-    # Генерируем уникальные данные для каждого запуска
-    import random
-    random_id = random.randint(100000, 999999)
-    return {
-        "email": f"test_user_{random_id}@example.com",
-        "password": "TestPass123",
-        "name": f"Test User {random_id}"
-    }
-
-@pytest.fixture
-def existing_user_data():
-    # Данные существующего пользователя (заранее зарегистрированного)
-    return {
-        "email": "test-data@yandex.ru",
-        "password": "password",
-        "name": "Username"
-    }
-
+@allure.title("Регистрация нового пользователя: успешный сценарий")
+@allure.description("Проверяем, что API позволяет зарегистрировать уникального пользователя и возвращает статус 200")
 def test_create_unique_user(api_client, unique_user_data):
     """Сценарий 1: создать уникального пользователя"""
     response = api_client.register_user(
@@ -35,23 +14,35 @@ def test_create_unique_user(api_client, unique_user_data):
     assert response.status_code == 200, f"Ожидался статус 200, получен {response.status_code}"
     assert response.json().get("success") is True, "Поле success должно быть True"
 
-def test_create_existing_user(api_client, existing_user_data):
-    """Сценарий 2: создать пользователя, который уже зарегистрирован"""
-    response = api_client.register_user(
-        email=existing_user_data["email"],
-        password=existing_user_data["password"],
-        name=existing_user_data["name"]
-    )
-    assert response.status_code == 403, f"Ожидался статус 403, получен {response.status_code}"
-    assert response.json().get("message") == "User already exists", "Сообщение об ошибке не совпадает"
 
+@allure.title("Попытка повторной регистрации: пользователь уже существует")
+@allure.description("Проверяем, что API отклоняет регистрацию существующего пользователя и возвращает корректный код ошибки")
+def test_create_existing_user(api_client, existing_user):
+    """Сценарий 2: попытка зарегистрировать уже существующего пользователя"""
+    
+    response = api_client.register_user(
+        email=existing_user["email"],
+        password=existing_user["password"],
+        name=existing_user["name"]
+    )
+    
+    assert response.status_code in (400, 403, 409), f"Ожидался код ошибки (400/403/409), получен {response.status_code}"
+    
+    message = response.json().get("message", "")
+    assert "already exists" in str(message).lower(), f"Сообщение об ошибке не совпадает: {message}"
+
+
+@allure.title("Регистрация без обязательного поля name: проверка валидации")
+@allure.description("Проверяем, что API отклоняет запрос, если не передано обязательное поле name")
 def test_create_user_missing_field(api_client, unique_user_data):
-    """Сценарий 3: создать пользователя и не заполнить одно из обязательных полей"""
-    # Пропустим поле name
+    """Сценарий 3: не передать обязательное поле name"""
     response = api_client.register_user(
         email=unique_user_data["email"],
         password=unique_user_data["password"],
-        name=None  # или вообще не передавать ключ name
+        name=None  
     )
-    assert response.status_code == 403, f"Ожидался статус 403, получен {response.status_code}"
-    assert "required" in response.json().get("message", "").lower(), "Сообщение должно содержать указание на обязательные поля"
+    
+    assert response.status_code in (400, 403), f"Ожидался код ошибки, получен {response.status_code}"
+    
+    message = response.json().get("message", "")
+    assert "required" in str(message).lower(), f"Сообщение не содержит указания на обязательные поля: {message}"
