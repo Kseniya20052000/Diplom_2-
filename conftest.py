@@ -1,36 +1,37 @@
 import pytest
-import random
-from utils.api_client import ApiClient
+import requests
+import uuid
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def base_url():
     return "https://stellarburgers.education-services.ru"
 
-@pytest.fixture
-def api_client(base_url):
-    return ApiClient(base_url)
-
-@pytest.fixture
-def unique_user_data():
-    random_id = random.randint(100000, 999999)
-    return {
-        "email": f"test_user_{random_id}@example.com",
-        "password": "TestPass123",
-        "name": f"Test User {random_id}"
+@pytest.fixture(scope="function")
+def registered_user(base_url):
+    """
+    Создаёт тестового пользователя. Если он уже есть — использует его.
+    Возвращает dict с email и password.
+    """
+    # Генерируем уникальный email, чтобы не было конфликтов между запусками
+    unique_email = f"test_auto_{uuid.uuid4().hex[:8]}@example.com"
+    payload = {
+        "email": unique_email,
+        "password": "12345",
+        "name": "Auto User"
     }
 
-@pytest.fixture(scope="function")
-def existing_user(api_client, unique_user_data):
-    """
-    Фикстура создаёт пользователя перед тестом и возвращает его данные.
-    Гарантирует, что пользователь точно существует.
-    """
-    response = api_client.register_user(
-        email=unique_user_data["email"],
-        password=unique_user_data["password"],
-        name=unique_user_data["name"]
-    )
-    
-    
-    if response.status_code != 200:
-        pytest.fail(f"Не удалось создать тестового пользователя для фикстуры existing_user. Статус: {response.status_code}, ответ: {response.text}")
+    register_url = f"{base_url}/api/users/"
+    resp = requests.post(register_url, json=payload)
+
+    if resp.status_code == 200:
+        # Пользователь успешно создан
+        return payload
+    elif resp.status_code == 409:
+        # Пользователь уже существует (редкий случай при UUID, но бывает)
+        # Просто вернём те же данные — он уже есть, можно логиниться
+        return payload
+    else:
+        raise RuntimeError(
+            f"Не удалось подготовить тестового пользователя: "
+            f"статус {resp.status_code}, ответ: {resp.text}"
+        )
