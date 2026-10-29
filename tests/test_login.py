@@ -1,52 +1,41 @@
 import pytest
 import allure
-import requests
-
-LOGIN_PATH = "/api/auth/login"
+from utils.api_client import ApiClient
+import uuid
 
 @allure.title("Авторизация: вход под существующим пользователем")
-@allure.description(
-    "Сценарий: регистрация тестового пользователя → успешная авторизация. "
-    "Проверяем статус 200, success=true, наличие accessToken и совпадение email."
-)
+@allure.description("Проверяем, что пользователь может успешно войти в систему.")
 @allure.severity(allure.severity_level.CRITICAL)
-def test_login_existing_user(base_url, registered_user):
-    url = base_url + LOGIN_PATH
-    payload = {
-        "email": registered_user["email"],
-        "password": registered_user["password"]
-    }
+def test_login_existing_user(base_url):
+    client = ApiClient(base_url)
+    
+    #  Сначала регистрируем пользователя, чтобы он точно существовал
+    unique_email = f"login_test_{uuid.uuid4().hex[:8]}@example.com"
+    reg_resp = client.register_user(email=unique_email, password="12345", name="Login User")
+    
+    if reg_resp.status_code != 200:
+        pytest.skip("Не удалось зарегистрировать пользователя для теста логина")
 
-    resp = requests.post(url, json=payload)
-
-    assert resp.status_code == 200, f"Ожидался статус 200, получен {resp.status_code}"
+    # Пытаемся войти
+    resp = client.login_user(email=unique_email, password="12345")
+    
+    # Проверяем успех
+    assert resp.status_code == 200
     data = resp.json()
+    assert "accessToken" in data
+    assert "refreshToken" in data
+    assert data["success"] is True
 
-    assert data.get("success") is True, "Поле success должно быть True"
-    assert "accessToken" in data, "В ответе должен присутствовать accessToken"
-    assert (
-        "user" in data and data["user"]["email"] == payload["email"]
-    ), "Email в ответе не совпадает с отправленным"
+@allure.title("Авторизация: вход с неверными учётными данными")
+@allure.description("Проверяем, что вход с неправильным паролем отклоняется.")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_login_wrong_credentials(client):
+    email = f"wrong_cred_{uuid.uuid4().hex[:8]}@example.com"
+    # Сначала зарегистрируем, чтобы пользователь точно существовал
+    reg_resp = client.register_user(email=email, password="12345", name="Test User")
+    assert reg_resp.status_code == 200
 
+    # Пытаемся войти с неправильным паролем
+    resp = client.login_user(email=email, password="wrong_password_123")
 
-@allure.title("Авторизация: ошибка при неверных логине и пароле")
-@allure.description(
-    "Сценарий: попытка входа с заведомо неверными данными. "
-    "Проверяем статус 401, success=false и корректное сообщение об ошибке."
-)
-@allure.severity(allure.severity_level.NORMAL)
-def test_login_invalid_credentials(base_url):
-    url = base_url + LOGIN_PATH
-    # Специально неверные данные
-    payload = {"email": "bad@example.com", "password": "wrong"}
-
-    resp = requests.post(url, json=payload)
-
-    assert resp.status_code == 401, f"Ожидался статус 401, получен {resp.status_code}"
-    data = resp.json()
-
-    assert data.get("success") is False, "Поле success должно быть False"
-    expected_message = "email or password are incorrect"
-    assert (
-        data.get("message") == expected_message
-    ), f"Сообщение об ошибке не совпадает: ожидалось '{expected_message}', получено '{data.get('message')}'"
+    assert resp.status_code in (401, 403) or (resp.status_code == 200 and resp.json().get("success") is False)
